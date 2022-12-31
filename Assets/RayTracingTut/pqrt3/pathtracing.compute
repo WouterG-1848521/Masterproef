@@ -14,6 +14,13 @@ SamplerState sampler_SkyboxTexture;
 float2 pixel;
 float seed;
 
+struct InfraRedEmitter {
+    float3 position;
+    float wavelength;
+    float3 direction;
+};
+float3 capturererPosition;
+
 struct Sphere {
     float3 position;
     float radius;
@@ -39,6 +46,7 @@ struct MeshObject {
 StructuredBuffer<MeshObject> meshObjects;
 StructuredBuffer<float3> vertices;
 StructuredBuffer<int> indices;
+StructuredBuffer<InfraRedEmitter> infraRedEmitters;
 
 /* *********************************************************************************************************************
  * Helper functions and constants
@@ -349,22 +357,94 @@ float3 Shade(inout Ray ray, RayHit hit) {
 float3 convertDistanceToColor(float distance) {
     if (distance == 1.#INF) {
         return float3(0, 0, 0);
-    } else if (distance < 1) {
-        return float3(1, 0, 0);
-    } else if (distance < 10) {
-        return float3(0, 1, 0);
-    } else if (distance < 15) {
-        return float3(0, 0, 1);
-    } else if (distance < 25) {
-        return float3(1, 1, 0);
-    } else if (distance < 40) {
-        return float3(1, 0, 1);
-    } else if (distance < 55) {
-        return float3(0, 1, 1);
+    } //else if (distance < 1) {
+    //     return float3(1, 0, 0);
+    // } else if (distance < 10) {
+    //     return float3(0, 1, 0);
+    // } else if (distance < 15) {
+    //     return float3(0, 0, 1);
+    // } else if (distance < 25) {
+    //     return float3(1, 1, 0);
+    // } else if (distance < 40) {
+    //     return float3(1, 0, 1);
+    // } else if (distance < 55) {
+    //     return float3(0, 1, 1);
+    // } else {
+    //     return float3(1, 1, 1);
+    // }
+
+    if (distance < 30) {
+        return float3(distance / 80, distance / 80, 1);
+    } else if (distance < 60) {
+        return float3(distance / 60, 1, distance / 60);
     } else {
-        return float3(1, 1, 1);
+        return float3(1, distance / 100, distance / 100);
     }
 }
+
+/* *********************************************************************************************************************
+ * depth tracing
+ ********************************************************************************************************************* */
+RayHit traceDepth(Ray ray) {
+    // normal trace into the scene
+    RayHit bestHit = CreateRayHit();
+    uint count, stride;
+    meshObjects.GetDimensions(count, stride);
+    for (uint i = 0; i < count; i++) {
+        IntersectMeshObject(ray, bestHit, meshObjects[i]);
+    }
+
+    // for this hit point, we need to calculate the depth from the emittor / capturer . ( the camera is just the view position, it had nothing do to with the depth calculation )
+
+    // trace from the hitpoint to the emmiter
+    float3 newDirection = infraRedEmitters[0].position - bestHit.position;  // the direction from the hitpoint to the emitter
+    Ray newRay = CreateRay(bestHit.position, newDirection);
+    RayHit newHit = CreateRayHit();
+    for (uint i = 0; i < count; i++) {
+        IntersectMeshObject(newRay, newHit, meshObjects[i]);
+    }
+
+    // calculate the distance between hitpoint and emittor
+    float distance = length(bestHit.position - infraRedEmitters[0].position);
+    distance = abs(distance);
+    // bestHit.distance = distance;
+
+    if (newHit.distance != 1.#INF) {
+        bestHit.distance = 1.#INF;
+    } else if (bestHit.distance != 1.#INF ) {
+        bestHit.distance = distance;
+    }
+
+    // if the distance is the same as the distance in the newHit, there is no object between the hitpoint and the emittor
+    if (distance == newHit.distance) {
+        
+    } else {
+        // newHit.distance = 1.#INF;
+    }
+
+    // trace from the emmiter to the hitpoint
+    // float3 newDirection = bestHit.position - infraRedEmitters[0].position;  // the direction from the emitter to the hitpoint
+    // Ray newRay = CreateRay(infraRedEmitters[0].position, newDirection);
+    // RayHit newHit = CreateRayHit();
+    // for (uint i = 0; i < count; i++) {
+    //     IntersectMeshObject(newRay, newHit, meshObjects[i]);
+    // }
+
+    // trace back into the infrared emitter
+    // float3 newDirection = infraRedEmitters[0].position - bestHit.position;  // the direction from the hitpoint to the emitter
+    // Ray reverseRay = CreateRay(bestHit.position, newDirection);
+    // RayHit reverseHit = CreateRayHit();
+    // for (uint i = 0; i < count; i++) {
+    //     IntersectMeshObject(reverseRay, reverseHit, meshObjects[i]);
+    // }
+
+    // // if we hit an object in the reverse ray, the object is not illuminated by the emitter
+    // if (reverseHit.distance < 1.#INF) {
+    //     bestHit.distance = 1.#INF;
+    // }
+
+    return bestHit;
+ }
 
 /* *********************************************************************************************************************
  * Main kernel
@@ -385,7 +465,7 @@ void CSMain (uint3 id : SV_DispatchThreadID) {
     // Trace and shade
     float3 result = float3(0, 0, 0);
     for (int i = 0; i < 8; i++) {
-        RayHit hit = Trace(ray);
+        RayHit hit = traceDepth(ray);
         // result += ray.energy * Shade(ray, hit);
         // if (!any(ray.energy))
         //     break; 
@@ -398,3 +478,14 @@ void CSMain (uint3 id : SV_DispatchThreadID) {
     Result[id.xy] = float4(result, 1);
 
 }
+
+
+
+/*
+ * How I will have to implement depth tracing
+ * intersect until an object is hit ( implemented )
+ * calculate the distance from infrared emmiter to the object ( this is the direct distance ) , see that there isn't a object in between
+ * then cast a reflected / scatterd / ... ray further into the scene and add that distance ( percent? ) ( this is the indirect distance)
+ * Calculate per hit the change in the wave length of the light.
+ * Secondary rays also have a wavelenght, this will have less of an impact on the final wavelength
+ */

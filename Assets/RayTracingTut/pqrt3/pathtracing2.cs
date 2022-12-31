@@ -22,11 +22,24 @@ public class pathtracing2 : MonoBehaviour {
         public Vector3 emmission;
     }
 
+    public struct InfraRedEmitter {
+        public Vector3 position;
+        public float wavelength;
+        public Vector3 direction;
+    }
+
     public ComputeShader RayTracingShader;
     public Camera curCamera;
     public Vector3 skyboxColor;
     public Texture SkyboxTexture;
     public Light DirectionalLight;
+
+    [Header("InfraRedLight")]
+    public bool moveEmmitor = false;
+    public InfraRedEmitter CurInfraRedEmitter;
+    public Transform emittorPosition;
+    private ComputeBuffer emmitorBuffer;
+    public Transform capturererPosition;
 
     private uint currentSample = 0;
     private Material addMaterial;
@@ -59,11 +72,30 @@ public class pathtracing2 : MonoBehaviour {
     private void OnEnable() {
         this.currentSample = 0;
         this.setUpScene();
+        this.CurInfraRedEmitter = new InfraRedEmitter();
+        this.CurInfraRedEmitter.position = this.emittorPosition.position;
+        // this.CurInfraRedEmitter.position = new Vector3(-5, 10, 2);
+        this.CurInfraRedEmitter.wavelength = 0.5f;
+        List<InfraRedEmitter> emmitors = new List<InfraRedEmitter>();
+        emmitors.Add(this.CurInfraRedEmitter);
+        CreateComputeBuffer(ref emmitorBuffer, emmitors, 28);
     }
 
     private void OnDisable() {
         if (this.sphereBuffer != null)
             this.sphereBuffer.Release();
+
+        if (this.meshObjectBuffer != null)
+            this.meshObjectBuffer.Release();
+
+        if (this.vertexBuffer != null)
+            this.vertexBuffer.Release();
+        
+        if (this.indexBuffer != null)
+            this.indexBuffer.Release();
+
+        if (this.emmitorBuffer != null)
+            this.emmitorBuffer.Release();
     }
 
     private void Update() {
@@ -77,6 +109,14 @@ public class pathtracing2 : MonoBehaviour {
                 this.currentSample = 0;
                 this.transformsToWatch[i].hasChanged = false;
             }
+        }
+
+        // update the emmitor
+        if (this.moveEmmitor) { // TODO : if we enable this, the shadow disapears -> thinks the emmitor in the shader is empty
+            this.CurInfraRedEmitter.position = this.curCamera.transform.position;
+            List<InfraRedEmitter> emmitors = new List<InfraRedEmitter>();
+            emmitors.Add(this.CurInfraRedEmitter);
+            CreateComputeBuffer(ref emmitorBuffer, emmitors, 16);
         }
     }
 
@@ -231,6 +271,10 @@ public class pathtracing2 : MonoBehaviour {
         SetComputeBuffer("meshObjects", meshObjectBuffer);
         SetComputeBuffer("vertices", vertexBuffer);
         SetComputeBuffer("indices", indexBuffer);
+
+        SetComputeBuffer("infraRedEmitters", emmitorBuffer);
+        RayTracingShader.SetVector("capturererPosition", this.capturererPosition.position);
+
     }
 
     private void InitRenderTexture() {
